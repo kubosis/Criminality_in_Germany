@@ -33,3 +33,30 @@ def transform_one_df(df, specifier_key, interesting_values_basic_table, year):
     other_columns = df.columns[df.columns != specifier_key]
 
     return create_transformed_df(df, specifier_column, other_columns, year)
+
+#Lags the selected predictor by the lag amount
+#Positive lag amount is the value of the predictor that many months/years ago
+#Negative lag is the value of the predictor in the future
+#Both will create NaN rows, at either the top or bottom of the df, use drop_nan_rows=True to drop all of those rows
+#Use the option drop_original=True to also drop the pred_to_lag predictor passed to the function
+#The pos=<int> is the position of where to insert the new lagged predictor, default is at the right end of the df
+def create_lagged_predictor(df, pred_to_lag, lag_amount, **kwargs):
+    #=kwargs.get("on", None)
+    new_col_name = str(lag_amount)+ "-Lagged: " + pred_to_lag
+    if kwargs.get("pos", None) is None:
+        df.insert(len(df.columns),new_col_name, df[pred_to_lag].shift(lag_amount))
+    else:
+        df.insert(kwargs.get("pos", None),new_col_name, df[pred_to_lag].shift(lag_amount))
+    if kwargs.get("drop_original", None) is not None:
+        if kwargs.get("drop_original", None):
+            df.drop([pred_to_lag], axis=1, inplace=True)
+    if kwargs.get("drop_nan_rows", None) is not None:
+        if kwargs.get("drop_nan_rows", None):
+            if lag_amount > 0:
+                df = df.iloc[lag_amount:,:]
+            else:
+                df = df.iloc[:lag_amount,:]
+    return df
+
+#Example usage:
+#create_lagged_predictor(df, "Date", 2, pos=0, drop_original=True)
