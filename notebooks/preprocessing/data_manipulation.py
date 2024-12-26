@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pandas as pd
 import numpy as np
 
@@ -14,7 +16,7 @@ def create_new_cols(specifier_column, other_columns):
                 for col in other_columns
             ]
 
-def create_transformed_df(df, specifier_column, other_columns, year):
+def create_transformed_df(df, specifier_column, other_columns, insert_new: Optional[dict] = None):
     new_columns = create_new_cols(specifier_column, other_columns)
 
     # Flatten the values of all columns except the specifier column
@@ -22,7 +24,10 @@ def create_transformed_df(df, specifier_column, other_columns, year):
     filtered_values = new_values[np.array([np.issubdtype(type(x), np.floating) for x in new_values])]
 
     df_transformed = pd.DataFrame([new_values], columns=new_columns)
-    df_transformed.insert(0, "year", [year])
+
+    if insert_new is not None:
+        for col, val in insert_new.items():
+            df_transformed.insert(0, col, [val])
 
     return df_transformed
 
@@ -33,6 +38,19 @@ def transform_one_df(df, specifier_key, interesting_values_basic_table, year):
     other_columns = df.columns[df.columns != specifier_key]
 
     return create_transformed_df(df, specifier_column, other_columns, year)
+
+def transform_and_translate_one_df(df, specifier_key, interesting_values_basic_table: dict[str, str]):
+    # Filter rows where the specifier_key value is in the interesting_values_basic_table keys
+    df = df[df[specifier_key].isin(interesting_values_basic_table.keys())]
+
+    # Translate the specifier_key column using the interesting_values_basic_table
+    df[specifier_key] = df[specifier_key].map(interesting_values_basic_table)
+
+    # Extract translated column and other columns
+    specifier_column = df[specifier_key].to_numpy().flatten()
+    other_columns = df.columns[df.columns != specifier_key]
+
+    return create_transformed_df(df, specifier_column, other_columns)
 
 #Lags the selected predictor by the lag amount
 #Positive lag amount is the value of the predictor that many months/years ago
