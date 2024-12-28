@@ -1,0 +1,147 @@
+---
+title: "LM_Analysis"
+output: html_document
+date: "2024-12-28"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)         # multicollinearity 
+library(lmtest)      # heteroskedasticity
+library(MASS)        # stepwise regression
+library(caret)       # model evaluation
+library(glmnet)      # LASSO
+library(AER)
+library(dplyr)       # all_of()
+```
+
+
+FUNCTIONS_______________________
+```{r}
+reduce_multicollinearity <- function(data, formula, vif_threshold = 5) {
+  current_model <- lm(formula, data = data)
+  response_variable <- as.character(formula[[2]])
+  removed_variables <- c()
+  
+  repeat {
+    vif_values <- vif(current_model)
+    max_vif <- max(vif_values)
+    
+    if (max_vif < vif_threshold) {
+      break
+    }
+    
+    variable_to_remove <- names(which.max(vif_values))
+    
+    cat("Removing variable:", variable_to_remove, "with VIF:", max_vif, "\n")
+    
+    removed_variables <- c(removed_variables, variable_to_remove)
+    
+    excluded_variables <- paste0("`", removed_variables, "`", collapse = " - ")
+    updated_formula <- as.formula(paste(response_variable, " ~ . -Date -", excluded_variables))
+    current_model <- lm(updated_formula, data = data)
+  }
+  print(updated_formula)
+  return(updated_formula)
+}
+
+check_model_assumptions <- function(model)
+{
+  # Multicollinearity
+  vif_values <- vif(model)
+  #print(vif_values)
+  high_vif <- names(vif_values[vif_values > 5])
+  #print(high_vif)
+  
+  # Homoskedasticity
+  par(mfrow = c(2, 2))  
+  plot(model)
+  bp_result <- bptest(model)
+  print(bp_result)
+  
+  # Normality of residuals
+  qqnorm(resid(model))
+  qqline(resid(model))
+  s_result <- shapiro.test(resid(model))
+  print(s_result)
+  # Linearity
+  #crPlots(model)
+  
+  # Summary
+  #print(summary(model))
+}
+```
+
+Choosing a set of predictors and testing basic assumptions, then shrinkage
+
+Economical variables:
+Energy and water earnings
+Information and communication earnings
+Education earnings
+Accomodation and food earnings
+Producers of capital goods
+Retail earnings
+Unemployment rate
+Vacancies count
+
+Social variables:
+Immigration arrivals
+Immigration departures
+German departures
+Births
+Marriages
+
+Dependent variables
+"Total.offences"
+"Offences.against.life"
+"Murder"
+"Criminal.offenses.against.sexual.self.determination.in.total"
+"Robberies.in.apartments"
+"Total.theft"
+
+```{r}
+var <- "Total.offences"
+# Load and clean data
+data_monthly <- read.csv("monthly.csv")
+data_cleaned <- na.omit(data_monthly)
+# Select columns + dependent column (var)
+data_selected <- data_cleaned %>%
+  dplyr::select(
+    Date,
+    !!sym(var),
+    Unemployment.rate,
+    Vacancies.unfilled,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.
+  )
+
+# Reduce multicollinearity
+offences_formula <- as.formula(paste(var, "~ . - Date"))
+
+reduced_formula <- reduce_multicollinearity(data_selected, offences_formula)
+
+# Create model
+offences_model <- lm(reduced_formula, data = data_selected)
+check_model_assumptions(offences_model)
+
+# Stepwise regression
+sink(tempfile())
+step_model <- stepAIC(offences_model, direction = "both", data = data_selected)
+sink()
+check_model_assumptions(step_model)
+
+```
+
+
