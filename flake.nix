@@ -14,6 +14,7 @@
       languageserver
       lintr
       IRkernel
+      jsonlite
       BiocManager
       devtools
       Matrix
@@ -47,6 +48,7 @@
       interp
       fastDummies
       FNN
+      AER
     ];
     R = pkgs.rWrapper.override { packages = rPackages; };
     python = pkgs.python312.withPackages (ps: with ps; [
