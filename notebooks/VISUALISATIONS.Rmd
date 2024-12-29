@@ -1,0 +1,183 @@
+---
+title: "VISUALISATIONS"
+output: html_document
+date: "2024-12-29"
+---
+
+```{r setup, include=FALSE}
+library(AER)
+library(dplyr)       # all_of()
+library(ggplot2)     # plotting  
+library(tidyr)       # plotting
+```
+Ideas for observations - is there relationship between non-germans and specific crime types
+
+basic percentage table - for selected crimes, are there any crimes which occur more often in non-german people
+do these percentages coincide with crime spikes or are there othere associations (2016-2022 is declining, 2023 crime spiked)
+
+YEARLY DATA ANALYSIS_______________________________________________________
+```{r}
+# Load data
+data <- read.csv("final.csv")
+
+#selection simple table
+total_cases_table <- data %>%
+  dplyr::select(
+    total.offences..recorded.cases,
+    bodily.injury..sects..223.227..229..231.PC...recorded.cases,
+    offences.against.life..recorded.cases,
+    murder..sect..211.PC...recorded.cases,
+    robbery..extortion.resembling.robbery..and.assault.on.motorists.with.intent.to.rob..sects..249.252..255..316a.PC...recorded.cases,
+    handbag.robbery..recorded.cases,
+    bodily.injury..sects..223.227..229..231.PC...recorded.cases,
+    serious.shoplifting..recorded.cases,
+    street.crime..recorded.cases,
+    unauthorised.trafficking..production.of..dispensing..and.possession.of.drugs..Sect..29a..1..no..2.NCA...significant.amount...recorded.cases,
+    property.and.forgery.offences..recorded.cases
+  )
+
+# Second table: Select columns related to non-German suspects
+non_german_suspects_table <- data %>%
+  dplyr::select(
+    total.offences..number.of.non.German.suspects,
+    bodily.injury..sects..223.227..229..231.PC...number.of.non.German.suspects,
+    offences.against.life..number.of.non.German.suspects,
+    murder..sect..211.PC...number.of.non.German.suspects,
+    robbery..extortion.resembling.robbery..and.assault.on.motorists.with.intent.to.rob..sects..249.252..255..316a.PC...number.of.non.German.suspects,
+    handbag.robbery..number.of.non.German.suspects,
+    bodily.injury..sects..223.227..229..231.PC...number.of.non.German.suspects,
+    serious.shoplifting..number.of.non.German.suspects,
+    street.crime..number.of.non.German.suspects,
+    unauthorised.trafficking..production.of..dispensing..and.possession.of.drugs..Sect..29a..1..no..2.NCA...significant.amount...number.of.non.German.suspects,
+    property.and.forgery.offences..number.of.non.German.suspects
+  )
+
+#what percentage of the crime was done by non_germans
+non_german_percentage <- (non_german_suspects_table / total_cases_table) * 100
+non_german_percentage$Year <- 2014:2023
+
+```
+
+
+VISUALISING FUNCTIONS__________________________
+```{r}
+visualise_stacked_bar <- function(dataset) {
+    
+  visualised_percentage_table <- dataset
+  
+  colnames(visualised_percentage_table) <- sapply(colnames(visualised_percentage_table), function(name) {
+    if (grepl("\\.{2}", name)) {
+      sub("\\.{2}.*", "", name)
+    } else {
+      name
+    }
+  })
+  
+  percentage_long <- visualised_percentage_table %>%
+    pivot_longer(
+      cols = -Year,  
+      names_to = "Crime_Type", 
+      values_to = "Percentage"  
+    )
+  
+  ggplot(percentage_long, aes(x = Year, y = Percentage, fill = Crime_Type)) +
+    geom_bar(stat = "identity", position = "stack") +
+    labs(
+      title = "Distribution of Crimes Over the Years (2014-2023)",
+      x = "Year",
+      y = "Percentage of Total Crimes",
+      fill = "Crime Type"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+visualise_crime_percentages_heatmap <- function(dataset) {
+  
+  colnames(dataset) <- sapply(colnames(dataset), function(name) {
+    if (grepl("\\.{2}", name)) {
+      sub("\\.{2}.*", "", name)
+    } else {
+      name
+    }
+  })
+  
+  percentage_long <- dataset %>%
+    pivot_longer(
+      cols = -Year,  
+      names_to = "Crime_Type",  
+      values_to = "Percentage"  
+    )
+  
+  ggplot(percentage_long, aes(x = Year, y = Crime_Type, fill = Percentage)) +
+    geom_tile(color = "white") +  
+    geom_text(aes(label = round(Percentage, 1)), size = 3) +  
+    scale_fill_gradient(low = "white", high = "red") +  
+    labs(
+      title = "Crime Percentages Heatmap (2014-2023)",
+      x = "Year",
+      y = "Crime Type",
+      fill = "Percentage"
+    ) +
+    theme_minimal() +
+    scale_x_continuous(breaks = 2014:2023) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),  
+      axis.text.y = element_text(size = 10),  
+      legend.position = "right"
+    )
+}
+```
+
+
+VISUALISING CRIME DISTRIBUTION BY MONTH__________________
+```{r}
+data_monthly <- read.csv("monthly.csv")
+data_cleaned <- na.omit(data_monthly)
+data_crime_months <- data_cleaned %>%
+  dplyr::select(
+    Date,
+    Total.offences,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+  )
+
+data_crime_months$Date <- as.Date(data_crime_months$Date)
+
+data_crime_months$Month <- format(data_crime_months$Date, "%b")  # Abbreviated month (Jan, Feb, etc.)
+data_crime_months$Year <- format(data_crime_months$Date, "%Y")  # Extract year if needed
+
+
+data_crime_long <- data_crime_months %>%
+  pivot_longer(-c(Date, Month, Year), names_to = "Crime_Type", values_to = "Count")
+
+ggplot(data_crime_long, aes(x = as.Date(Date), y = Count, color = Crime_Type)) +
+  geom_line(size = 1) +
+  labs(title = "Crime Counts Over Time", x = "Date", y = "Crime Count") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+monthly_crime <- data_crime_long %>%
+  group_by(Month, Crime_Type) %>%
+  summarise(Average_Count = mean(Count))
+
+czech_months <- c("led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro")
+
+monthly_crime <- monthly_crime %>%
+  mutate(Month = factor(Month, levels = czech_months))
+
+ggplot(monthly_crime, aes(x = Month, y = Average_Count, color = Crime_Type, group = Crime_Type)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +  
+  labs(title = "Average Monthly Crime Fluctuations",
+       x = "Month", y = "Average Crime Count") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+
+```
+
+VISUALISATION______________________________________
+```{r}
+visualise_crime_percentages_heatmap(non_german_percentage)
+
+```
