@@ -63,6 +63,7 @@
       statsmodels
       scikit-learn
       cvxopt
+      scienceplots
     ]);
   in {
     devShells.${system}.default = pkgs.mkShell {
