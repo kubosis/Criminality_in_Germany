@@ -73,7 +73,7 @@
         python -m ipykernel install --user --name=${pythonKernelName}
         mkdir -p "${RKernelDir}"
         echo '{
-          "argv": [ "${pkgs.R}/bin/R", "--slave", "-e", "IRkernel::main()", "--args", "{connection_file}" ],
+          "argv": [ "${R}/bin/R", "--slave", "-e", "IRkernel::main()", "--args", "{connection_file}" ],
           "display_name": "${RKernelName}",
           "language": "R"
         }' > "${RKernelDir}/kernel.json"
