@@ -51,6 +51,7 @@
       AER
     ];
     R = pkgs.rWrapper.override { packages = rPackages; };
+    RStudio = pkgs.rstudioWrapper.override { packages = rPackages; };
     python = pkgs.python312.withPackages (ps: with ps; [
       ipykernel
       jupyter
@@ -67,6 +68,7 @@
     devShells.${system}.default = pkgs.mkShell {
       packages = [
         R
+        RStudio
         python
         pkgs.pandoc
       ];
