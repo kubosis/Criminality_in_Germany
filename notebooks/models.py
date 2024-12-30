@@ -18,14 +18,32 @@ plt.rcParams.update(
         "xtick.labelsize": 9,
         "ytick.labelsize": 9,
         "legend.fontsize": 9,
+        "legend.title_fontsize": 10,
         "figure.titlesize": 14,
         "lines.linewidth": 1.5,
         "lines.markersize": 6,
     }
 )
 
+FROM_YEAR = 2014
+TO_YEAR = 2023
 MONTHLY_DATASET_PATH = Path("monthly.csv")
 YEARLY_DATASET_PATH = Path("final.csv")
+
+MONTH_LABELS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 
 
 class StationarityStats(NamedTuple):
@@ -41,6 +59,23 @@ def lineplot(data: pd.DataFrame, y: str, ylabel: str):
     ax.set_xlabel("Year")
     ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
+    for year in range(FROM_YEAR, TO_YEAR + 1):
+        plt.axvline(
+            pd.Timestamp(f"{year}-01-01"), color="black", linestyle="--", linewidth=0.8
+        )
+
+    return fig
+
+
+def seasonal_plot(data: pd.DataFrame, y: str, ylabel: str):
+    fig, ax = plt.subplots()
+    sns.lineplot(data=data, x="month", y=y, hue="year", palette="Set2")
+    ax.set_xticks(range(1, len(MONTH_LABELS) + 1))
+    ax.set_xticklabels(MONTH_LABELS, rotation=45)
+    ax.set_xlabel("Month")
+    ax.set_ylabel(ylabel)
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.legend(title="Year", bbox_to_anchor=(1.0, 1.0))
 
     return fig
 
@@ -58,22 +93,8 @@ def boxplot_yearly(data: pd.DataFrame, y: str, ylabel: str):
 def boxplot_monthly(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
     sns.boxplot(data=data, x="month", y=y, ax=ax)
-    ax.set_xticklabels(
-        [
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-        ]
-    )
+    ax.set_xtics(range(1, len(MONTH_LABELS) + 1))
+    ax.set_xticklabels(MONTH_LABELS, rotation=45)
     ax.set_xlabel("Month")
     ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
@@ -128,7 +149,7 @@ def get_montlhy_dataset() -> pd.DataFrame:
     df["Date"] = pd.to_datetime(df["Date"])
     df["year"] = df["Date"].dt.year
     df["month"] = df["Date"].dt.month
-    mask = (df.year >= 2014) & (df.year <= 2023)
+    mask = (df.year >= FROM_YEAR) & (df.year <= TO_YEAR)
 
     return df[mask]
 
