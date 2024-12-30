@@ -35,29 +35,29 @@ class StationarityStats(NamedTuple):
     kpss_pval: float
 
 
-def total_offences_lineplot(data: pd.DataFrame):
+def lineplot(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
-    sns.lineplot(data=data, x="Date", y="Total offences", ax=ax)
+    sns.lineplot(data=data, x="Date", y=y, ax=ax)
     ax.set_xlabel("Year")
-    ax.set_ylabel("Total Offences")
+    ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
 
     return fig
 
 
-def total_offences_boxplot_yearly(data: pd.DataFrame):
+def boxplot_yearly(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
-    sns.boxplot(data=data, x="year", y="Total offences", ax=ax)
+    sns.boxplot(data=data, x="year", y=y, ax=ax)
     ax.set_xlabel("Year")
-    ax.set_ylabel("Total Offences")
+    ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
 
     return fig
 
 
-def total_offences_boxplot_monthly(data: pd.DataFrame):
+def boxplot_monthly(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
-    sns.boxplot(data=data, x="month", y="Total offences", ax=ax)
+    sns.boxplot(data=data, x="month", y=y, ax=ax)
     ax.set_xticklabels(
         [
             "Jan",
@@ -75,7 +75,7 @@ def total_offences_boxplot_monthly(data: pd.DataFrame):
         ]
     )
     ax.set_xlabel("Month")
-    ax.set_ylabel("Total Offences")
+    ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
 
     return fig
