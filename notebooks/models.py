@@ -69,7 +69,7 @@ def lineplot(data: pd.DataFrame, y: str, ylabel: str):
 
 def seasonal_plot(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
-    sns.lineplot(data=data, x="month", y=y, hue="year", palette="Set2")
+    sns.lineplot(data=data, x="month", y=y, hue="year", palette="bright")
     ax.set_xticks(range(1, len(MONTH_LABELS) + 1))
     ax.set_xticklabels(MONTH_LABELS, rotation=45)
     ax.set_xlabel("Month")
@@ -93,7 +93,7 @@ def boxplot_yearly(data: pd.DataFrame, y: str, ylabel: str):
 def boxplot_monthly(data: pd.DataFrame, y: str, ylabel: str):
     fig, ax = plt.subplots()
     sns.boxplot(data=data, x="month", y=y, ax=ax)
-    ax.set_xtics(range(1, len(MONTH_LABELS) + 1))
+    ax.set_xticks(range(len(MONTH_LABELS)))
     ax.set_xticklabels(MONTH_LABELS, rotation=45)
     ax.set_xlabel("Month")
     ax.set_ylabel(ylabel)
