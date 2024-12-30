@@ -49,8 +49,10 @@ MONTH_LABELS = (
 class StationarityStats(NamedTuple):
     adf_stat: float
     adf_pval: float
+    adf_lags: int
     kpss_stat: float
     kpss_pval: float
+    kpss_lags: int
 
 
 def lineplot(data: pd.DataFrame, y: str, ylabel: str):
@@ -108,10 +110,12 @@ def is_stationary(ts: pd.Series, alpha: float = 0.05, regression: str = "ct") ->
 
 
 def stationarity_stats(ts: pd.Series, regression: str = "ct") -> StationarityStats:
-    adf_stat, adf_pval, *_ = adfuller(ts, regression=regression)
-    kpss_stat, kpss_pval, *_ = kpss(ts, regression=regression)
+    adf_stat, adf_pval, adf_lags, *_ = adfuller(ts, regression=regression)
+    kpss_stat, kpss_pval, kpss_lags, *_ = kpss(ts, regression=regression)
 
-    return StationarityStats(adf_stat, adf_pval, kpss_stat, kpss_pval)
+    return StationarityStats(
+        adf_stat, adf_pval, adf_lags, kpss_stat, kpss_pval, kpss_lags
+    )
 
 
 def stationarity_table(
@@ -121,22 +125,22 @@ def stationarity_table(
     tfmt = dict()
     tfmt["Orig"] = ts
     tfmt["Diff"] = ts.diff().dropna()
-    tfmt["SeasonDiff"] = ts.diff(period).dropna()
-    tfmt["Diff + SeasonDiff"] = ts.diff().diff(period).dropna()
+    tfmt["Season"] = ts.diff(period).dropna()
+    tfmt["Diff + Season"] = ts.diff().diff(period).dropna()
     tfmt["Log"] = ts_log
     tfmt["Diff(Log)"] = ts_log.diff().dropna()
-    tfmt["SeasonDiff(Log)"] = ts_log.diff(period).dropna()
-    tfmt["(Diff + SeasonDiff)(Log)"] = ts_log.diff().diff(period).dropna()
+    tfmt["Season(Log)"] = ts_log.diff(period).dropna()
+    tfmt["(Diff + Season)(Log)"] = ts_log.diff().diff(period).dropna()
 
     rows = []
     for name, tfmt_ts in tfmt.items():
         stats = stationarity_stats(tfmt_ts, regression=regression)
         row = {
             "Name": name,
-            "ADF stat": stats.adf_stat,
             "ADF p-val": stats.adf_pval,
-            "KPSS stat": stats.kpss_stat,
+            "ADF lags": stats.adf_lags,
             "KPSS p-val": stats.kpss_pval,
+            "KPSS lags": stats.kpss_lags,
             "Stationary": is_stationary(tfmt_ts, regression=regression),
         }
         rows.append(row)
