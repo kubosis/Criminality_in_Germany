@@ -9,7 +9,7 @@ import seaborn as sns
 from matplotlib.ticker import NullLocator
 from statsmodels.tsa.stattools import adfuller, kpss
 
-plt.style.use(["science", "notebook"])
+plt.style.use(["science", "nature"])
 plt.rcParams.update(
     {
         "font.size": 10,
@@ -55,12 +55,16 @@ class StationarityStats(NamedTuple):
     kpss_lags: int
 
 
-def lineplot(data: pd.DataFrame, y: str, ylabel: str):
+def lineplot(data: pd.DataFrame, y: str, ylabel: str, **kwargs):
     fig, ax = plt.subplots()
-    sns.lineplot(data=data, x="Date", y=y, ax=ax)
+    sns.lineplot(data=data, x="Date", y=y, ax=ax, **kwargs)
     ax.set_xlabel("Year")
     ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
+
+    for label in ax.get_xticklabels():
+        label.set_rotation(45)
+
     for year in range(FROM_YEAR, TO_YEAR + 1):
         plt.axvline(
             pd.Timestamp(f"{year}-01-01"), color="black", linestyle="--", linewidth=0.8
@@ -84,19 +88,22 @@ def seasonal_plot(data: pd.DataFrame, y: str, ylabel: str):
     return fig
 
 
-def boxplot_yearly(data: pd.DataFrame, y: str, ylabel: str):
+def boxplot_yearly(data: pd.DataFrame, y: str, ylabel: str, **kwargs):
     fig, ax = plt.subplots()
-    sns.boxplot(data=data, x="year", y=y, ax=ax)
+    sns.boxplot(data=data, x="year", y=y, ax=ax, **kwargs)
     ax.set_xlabel("Year")
     ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
 
+    for label in ax.get_xticklabels():
+        label.set_rotation(45)
+
     return fig
 
 
-def boxplot_monthly(data: pd.DataFrame, y: str, ylabel: str):
+def boxplot_monthly(data: pd.DataFrame, y: str, ylabel: str, **kwargs):
     fig, ax = plt.subplots()
-    sns.boxplot(data=data, x="month", y=y, ax=ax)
+    sns.boxplot(data=data, x="month", y=y, ax=ax, **kwargs)
     ax.set_xticks(range(len(MONTH_LABELS)))
     ax.set_xticklabels(MONTH_LABELS, rotation=45)
     ax.set_xlabel("Month")
