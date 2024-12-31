@@ -78,6 +78,8 @@ def seasonal_plot(data: pd.DataFrame, y: str, ylabel: str):
     ax.set_ylabel(ylabel)
     ax.xaxis.set_minor_locator(NullLocator())
     ax.legend(title="Year", bbox_to_anchor=(1.0, 1.0))
+    for month in range(1, len(MONTH_LABELS) + 1):
+        plt.axvline(month, color="black", linestyle="--", linewidth=0.8)
 
     return fig
 
