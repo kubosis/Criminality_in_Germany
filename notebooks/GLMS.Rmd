@@ -1,0 +1,458 @@
+---
+title: "SAN GLMS"
+output: html_document
+date: "2024-20-12"
+---
+
+
+```{r}
+library(tidyverse)
+library(car)         # multicollinearity 
+library(lmtest)      # heteroskedasticity
+library(MASS)        # stepwise regression
+library(caret)       # model evaluation
+library(glmnet)      # LASSO
+library(AER)
+library(dplyr)       # all_of()
+library(ggplot2)     # plotting  
+library(tidyr)       # plotting
+```
+
+
+FUNCTIONS______________________
+```{r}
+evaluate_glm <- function(data, formula, k = 10, seed = 123) {
+  set.seed(seed)
+  
+  # Create k-fold indices
+  folds <- createFolds(data$Criminal.offenses.against.sexual.self.determination.in.total, k = k, list = TRUE, returnTrain = TRUE)
+  
+  # Initialize variables to store results
+  results <- data.frame(Fold = 1:k, RMSE = NA, MAE = NA, Accuracy = NA)
+  
+  # Loop through each fold
+  for (i in seq_along(folds)) {
+    train_indices <- folds[[i]]
+    test_indices <- setdiff(seq_len(nrow(data)), train_indices)
+    
+    # Split data into training and testing sets
+    train_data <- data[train_indices, ]
+    test_data <- data[test_indices, ]
+    
+    # Train the GLM model
+    glm_model <- glm.nb(formula, data = train_data)
+    
+    # Make predictions on the test set
+    predictions <- predict(glm_model, newdata = test_data, type = "response")
+    
+    # Calculate evaluation metrics
+    actuals <- test_data$Criminal.offenses.against.sexual.self.determination.in.total
+    rmse <- sqrt(mean((predictions - actuals)^2))  # Root Mean Squared Error
+    mae <- mean(abs(predictions - actuals))        # Mean Absolute Error
+    accuracy <- cor(predictions, actuals)         # Correlation as accuracy proxy
+    
+    # Store results for this fold
+    results$RMSE[i] <- rmse
+    results$MAE[i] <- mae
+    results$Accuracy[i] <- accuracy
+  }
+  
+  # Compute mean metrics across all folds
+  mean_rmse <- mean(results$RMSE)
+  mean_mae <- mean(results$MAE)
+  mean_accuracy <- mean(results$Accuracy)
+  
+  # Print qualitative evaluation
+  cat("Qualitative Evaluation of the GLM:\n")
+  cat("Mean RMSE:", round(mean_rmse, 2), "\n")
+  cat("Mean MAE:", round(mean_mae, 2), "\n")
+  cat("Mean Accuracy (correlation):", round(mean_accuracy, 2), "\n")
+  
+  # Return detailed results
+  return(list(Fold_Results = results, Mean_RMSE = mean_rmse, Mean_MAE = mean_mae, Mean_Accuracy = mean_accuracy))
+}
+
+check_glm <- function(glm, dataset, seed, is_poisson, var) {  
+  par(mfrow = c(2, 2))
+  
+  plot(glm)  
+  
+  bpresult <- bptest(glm)
+  
+  vif_vals <- vif(glm)
+  
+  theta <- summary(glm)$theta
+  
+  residuals_deviance <- residuals(glm, type = "deviance")
+  plot(fitted(glm), residuals_deviance, main = "Deviance Residuals vs Fitted")
+  abline(h = 0, col = "red")
+  
+  #print(summary(glm))
+  
+  if(is_poisson){
+    dispersion <- dispersiontest(glm)
+  }
+  else{
+    dispersion <- NULL
+  }
+    
+  model_aic <- AIC(glm)
+  
+  # Pseudo R-squared
+  pseudo_r2 <- 1 - (glm$deviance / glm$null.deviance)
+  
+  predicted <- predict(glm, type = "response")
+  residuals <- residuals(glm, type = "pearson")
+  plot(predicted, residuals, main = "Residuals vs Predicted", xlab = "Predicted", ylab = "Residuals")
+  abline(h = 0, col = "red")
+
+  set.seed(seed)
+  train_index <- sample(1:nrow(dataset), 0.8 * nrow(dataset))
+  train_data <- dataset[train_index, ]
+  test_data <- dataset[-train_index, ]
+  formula <- as.formula(paste(var, "~ . "))
+  if(is_poisson){
+    glm_train <- glm(formula, data = train_data)
+  }
+  else{
+    glm_train <- glm.nb(formula, data = train_data)
+  }
+  
+  pred <- predict(glm_train, newdata = test_data, type = "response")
+  test_correlation <- cor(pred, test_data[[var]])
+  
+  
+  return(list(
+    Dispersion_Test = dispersion,
+    Bpresult = bpresult,
+    VIFvals = vif_vals,
+    Theta = theta,
+    AIC = model_aic,
+    Pseudo_R2 = pseudo_r2,
+    Test_Correlation = test_correlation,
+    Residuals_vs_Predicted_Plot = "See plot output"
+  ))
+}
+
+compare_glm_with_lag <- function(data, data_lagged, formula_glm, formula_glm_lagged, metric = "AIC") {
+  
+  glm_original <- glm.nb(formula_glm, data = data)
+  glm_lagged <- glm.nb(formula_glm_lagged, data = data_lagged)
+  
+  if (metric == "AIC") {
+    comparison <- c(AIC_original = AIC(glm_original), AIC_lagged = AIC(glm_lagged))
+  } else if (metric == "BIC") {
+    comparison <- c(BIC_original = BIC(glm_original), BIC_lagged = BIC(glm_lagged))
+  } else if (metric == "RMSE") {
+    rmse <- function(model, data) {
+      preds <- predict(model, newdata = data, type = "response")
+      sqrt(mean((data[[response]] - preds)^2))
+    }
+    comparison <- c(
+      RMSE_original = rmse(glm_original, data),
+      RMSE_lagged = rmse(glm_lagged, data_lagged)
+    )
+  } else {
+    stop("Invalid metric. Choose 'AIC', 'BIC', or 'RMSE'.")
+  }
+  
+  return(list(comparison = comparison, glm_original = glm_original, glm_lagged = glm_lagged))
+}
+```
+
+LOAD DATA
+```{r}
+data_monthly <- read.csv("monthly.csv")
+data_cleaned <- na.omit(data_monthly)
+```
+
+GLMs on the variables that came out as relevant in the LM________________
+```{r}
+
+data_total <- data_cleaned %>%
+  dplyr::select(
+    Total.offences,
+    Unemployment.rate,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    #Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    #Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Human.health.and.social.work.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Gambling.and.betting.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Manufacture.of.beverages..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+  )
+data_total <- data_total[!(rownames(data_total) %in% c("133", "134")), ]
+
+# Poisson GLM
+glm_poisson <- glm(Total.offences ~ ., family = poisson, data = data_total)
+#summary(glm_poisson)
+#check_glm(glm_poisson, data_total, 111, TRUE, "Total.offences")
+
+# Negative binomial GLM
+glm_total_offences <- glm.nb(Total.offences ~ ., data = data_total)
+#summary(glm_total_offences)
+#check_glm(glm_total_offences, data_total, 111, FALSE, "Total.offences")
+
+# LASSO
+X <- model.matrix(Total.offences ~ ., data = data_total)[, -1] # Remove the intercept column
+y <- data_total$Total.offences
+
+lasso_model <- cv.glmnet(
+  X, y,
+  family = "poisson",  # Poisson as an approximation for Negative Binomial
+  alpha = 1,           # LASSO penalty
+  nfolds = 10,         # Cross-validation
+  standardize = TRUE   # Standardize predictors
+)
+
+plot(lasso_model)
+
+best_lambda <- lasso_model$lambda.min
+cat("Optimal lambda:", best_lambda, "\n")
+
+lasso_coef <- coef(lasso_model, s = best_lambda)
+print(lasso_coef)
+
+selected_vars <- rownames(lasso_coef)[which(lasso_coef != 0)]
+cat("Selected predictors:\n", paste(selected_vars[-1], collapse = ", "), "\n") # Exclude intercept
+
+# Refit glm.nb 
+reduced_formula <- as.formula(paste("Total.offences ~", paste(selected_vars[-1], collapse = " + ")))
+glm_offences_lasso <- glm.nb(reduced_formula, data = data_total)
+
+summary(glm_offences_lasso)
+
+check_glm(glm_offences_lasso, data_total, seed, FALSE, "Total.offences")
+
+cat("Original glm_total_offences AIC:", AIC(glm_total_offences), "\n")
+cat("Reduced glm_total_offences AIC (LASSO):", AIC(glm_offences_lasso), "\n")
+
+
+```
+```{r}
+data_theft <- data_cleaned %>%
+  dplyr::select(
+    Total.theft,
+    Unemployment.rate,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    #Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Human.health.and.social.work.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Gambling.and.betting.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Manufacture.of.beverages..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+  )
+
+data_theft <- data_theft[!(rownames(data_theft) %in% c("133", "134", "73", "136", "124", "137")), ]
+
+# Poisson GLM
+glm_poisson <- glm(Total.theft ~ ., family = poisson, data = data_theft)
+#summary(glm_poisson)
+#check_glm(glm_poisson, data_theft, 111, TRUE, "Total.theft")
+
+# Negative binomial GLM
+glm_total_theft <- glm.nb(Total.theft ~ ., data = data_theft)
+#summary(glm_total_theft)
+#check_glm(glm_total_theft, data_theft, 111, FALSE, "Total.theft")
+
+# LASSO
+X <- model.matrix(Total.theft ~ ., data = data_theft)[, -1] # Remove the intercept column
+y <- data_theft$Total.theft
+
+lasso_model <- cv.glmnet(
+  X, y,
+  family = "poisson",  # Poisson as an approximation for Negative Binomial
+  alpha = 1,           # LASSO penalty
+  nfolds = 10,         # Cross-validation
+  standardize = TRUE   # Standardize predictors
+)
+
+plot(lasso_model)
+
+best_lambda <- lasso_model$lambda.min
+cat("Optimal lambda:", best_lambda, "\n")
+
+lasso_coef <- coef(lasso_model, s = best_lambda)
+print(lasso_coef)
+
+selected_vars <- rownames(lasso_coef)[which(lasso_coef != 0)]
+cat("Selected predictors:\n", paste(selected_vars[-1], collapse = ", "), "\n") # Exclude intercept
+
+# Refit glm.nb 
+reduced_formula <- as.formula(paste("Total.theft ~", paste(selected_vars[-1], collapse = " + ")))
+glm_theft_lasso <- glm.nb(reduced_formula, data = data_theft)
+
+summary(glm_theft_lasso)
+
+check_glm(glm_theft_lasso, data_theft, seed, FALSE, "Total.theft")
+
+cat("Original glm_total_offences AIC:", AIC(glm_total_theft), "\n")
+cat("Reduced glm_total_offences AIC (LASSO):", AIC(glm_theft_lasso), "\n")
+```
+
+```{r}
+data_sexual_offences <- data_cleaned %>%
+  dplyr::select(
+    Criminal.offenses.against.sexual.self.determination.in.total,
+    #Unemployment.rate,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    #Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    #Turnover.in.retail.trade,
+    #Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Human.health.and.social.work.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Gambling.and.betting.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Consumer.Price.Index,
+    #Manufacture.of.beverages..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+  )
+
+#data_sexual_offences <- data_sexual_offences[!(rownames(data_sexual_offences) %in% c("54", "59")), ]
+
+# Poisson GLM
+glm_poisson <- glm(Criminal.offenses.against.sexual.self.determination.in.total ~ ., family = poisson, data = data_sexual_offences)
+#summary(glm_poisson)
+#check_glm(glm_poisson, data_sexual_offences, 111, TRUE, "Criminal.offenses.against.sexual.self.determination.in.total")
+
+# Negative binomial GLM
+glm_sexual_offences <- glm.nb(Criminal.offenses.against.sexual.self.determination.in.total ~ ., data = data_sexual_offences)
+#summary(glm_sexual_offences)
+#check_glm(glm_sexual_offences, data_sexual_offences, 111, FALSE, "Criminal.offenses.against.sexual.self.determination.in.total")
+
+# LASSO
+X <- model.matrix(Criminal.offenses.against.sexual.self.determination.in.total ~ ., data = data_sexual_offences)[, -1] # Remove the intercept column
+y <- data_sexual_offences$Criminal.offenses.against.sexual.self.determination.in.total
+
+lasso_model <- cv.glmnet(
+  X, y,
+  family = "poisson",  # Poisson as an approximation for Negative Binomial
+  alpha = 1,           # LASSO penalty
+  nfolds = 10,         # Cross-validation
+  standardize = TRUE   # Standardize predictors
+)
+
+plot(lasso_model)
+
+best_lambda <- lasso_model$lambda.min
+cat("Optimal lambda:", best_lambda, "\n")
+
+lasso_coef <- coef(lasso_model, s = best_lambda)
+print(lasso_coef)
+
+selected_vars <- rownames(lasso_coef)[which(lasso_coef != 0)]
+cat("Selected predictors:\n", paste(selected_vars[-1], collapse = ", "), "\n") # Exclude intercept
+
+# Refit glm.nb 
+reduced_formula <- as.formula(paste("Criminal.offenses.against.sexual.self.determination.in.total ~", paste(selected_vars[-1], collapse = " + ")))
+glm_soffences_lasso <- glm.nb(reduced_formula, data = data_sexual_offences)
+
+summary(glm_soffences_lasso)
+
+check_glm(glm_soffences_lasso, data_sexual_offences, seed, FALSE, "Criminal.offenses.against.sexual.self.determination.in.total")
+
+cat("Original glm_total_offences AIC:", AIC(glm_sexual_offences), "\n")
+cat("Reduced glm_total_offences AIC (LASSO):", AIC(glm_soffences_lasso), "\n")
+```
+GLM lagged predictors for total offences
+```{r}
+data_lagged <- read.csv("1monthLag.csv")
+data_clean_lagged <- na.omit(data_lagged)
+data_seleted_lagged <- data_clean_lagged %>%
+  dplyr::select(
+    Total.offences,
+    Unemployment.rate,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    #X1.Lagged..Germans_Total_Departures.to.foreign.countries,
+    X1.Lagged..Foreigners_Total_Arrivals.from.foreign.countries,
+    X1.Lagged..Foreigners_Total_Departures.to.foreign.countries,
+    Germans_Total_Departures.to.foreign.countries,
+    #Foreigners_Total_Arrivals.from.foreign.countries,
+    #Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+  )
+
+lagged_glm <- glm.nb(Total.offences ~ ., data = data_seleted_lagged)
+
+# LASSO
+X <- model.matrix(Total.offences ~ ., data = data_seleted_lagged)[, -1] # Remove the intercept column
+y <- data_seleted_lagged$Total.offences
+
+lasso_model <- cv.glmnet(
+  X, y,
+  family = "poisson",  # Poisson as an approximation for Negative Binomial
+  alpha = 1,           # LASSO penalty
+  nfolds = 10,         # Cross-validation
+  standardize = TRUE   # Standardize predictors
+)
+
+plot(lasso_model)
+
+best_lambda <- lasso_model$lambda.min
+
+lasso_coef <- coef(lasso_model, s = best_lambda)
+print(lasso_coef)
+
+selected_vars <- rownames(lasso_coef)[which(lasso_coef != 0)]
+cat("Selected predictors:\n", paste(selected_vars[-1], collapse = ", "), "\n") 
+
+# Refit glm.nb 
+reduced_formula <- as.formula(paste("Total.offences ~", paste(selected_vars[-1], collapse = " + ")))
+glm_lagged_lasso <- glm.nb(reduced_formula, data = data_seleted_lagged)
+
+formula_glm_lagged <- as.formula(glm_lagged_lasso)
+formula_glm <- as.formula(glm_offences_lasso)
+
+
+compare_glm_with_lag(data_total, data_seleted_lagged, formula_glm, formula_glm_lagged)
+
+
+#check_glm(glm_offences_lasso, data_total, seed, FALSE, "Total.offences")
+#check_glm(glm_lagged_lasso, data_seleted_lagged, seed, FALSE, "Total.offences")
+
+```
+
+
+TESTING AND COMPARISON
+```{r}
+#check_glm(glm_offences_lasso, data_total, seed, FALSE, "Total.offences")
+#check_glm(glm_theft_lasso, data_theft, seed, FALSE, "Total.theft")
+#check_glm(glm_soffences_lasso, data_sexual_offences, seed, FALSE, "Criminal.offenses.against.sexual.self.determination.in.total")
+
+evaluate_glm(data_total, as.formula(glm_offences_lasso))
+evaluate_glm(data_theft, as.formula(glm_theft_lasso))
+evaluate_glm(data_sexual_offences, as.formula(glm_soffences_lasso))
+mean(data_total$Total.offences)
+mean(data_theft$Total.theft)
+mean(data_sexual_offences$Criminal.offenses.against.sexual.self.determination.in.total)
+```

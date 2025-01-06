@@ -1,0 +1,397 @@
+---
+title: "LM_Analysis"
+output: html_document
+date: "2024-12-28"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)         # multicollinearity 
+library(lmtest)      # heteroskedasticity
+library(MASS)        # stepwise regression
+library(caret)       # model evaluation
+library(glmnet)      # LASSO
+library(AER)
+library(dplyr)       # all_of()
+```
+
+
+FUNCTIONS_______________________
+```{r}
+reduce_multicollinearity <- function(data, formula, vif_threshold = 5) {
+  current_model <- lm(formula, data = data)
+  response_variable <- as.character(formula[[2]])
+  removed_variables <- c()
+  
+  repeat {
+    vif_values <- vif(current_model)
+    max_vif <- max(vif_values)
+    
+    if (max_vif < vif_threshold) {
+      break
+    }
+    
+    variable_to_remove <- names(which.max(vif_values))
+    
+    cat("Removing variable:", variable_to_remove, "with VIF:", max_vif, "\n")
+    
+    removed_variables <- c(removed_variables, variable_to_remove)
+    
+    excluded_variables <- paste0("`", removed_variables, "`", collapse = " - ")
+    updated_formula <- as.formula(paste(response_variable, " ~ . -", excluded_variables))
+    current_model <- lm(updated_formula, data = data)
+  }
+  print(updated_formula)
+  return(updated_formula)
+}
+
+check_model_assumptions <- function(model)
+{
+  # Multicollinearity
+  vif_values <- vif(model)
+  #print(vif_values)
+  high_vif <- names(vif_values[vif_values > 5])
+  #print(high_vif)
+  
+  # Homoskedasticity
+  par(mfrow = c(2, 2))  
+  plot(model)
+  bp_result <- bptest(model)
+  print(bp_result)
+  
+  # Normality of residuals
+  qqnorm(resid(model))
+  qqline(resid(model))
+  s_result <- shapiro.test(resid(model))
+  print(s_result)
+  # Linearity
+  #crPlots(model)
+  
+  # Summary
+  print(summary(model))
+}
+
+cross_validate_lm <- function(formula, data, k = 10, seed = 111) {
+  set.seed(seed) 
+  
+  data <- data[sample(nrow(data)), ]
+  
+  folds <- cut(seq(1, nrow(data)), breaks = k, labels = FALSE)
+  
+  errors <- numeric(k)
+  r_squared <- numeric(k)
+  
+  for (i in 1:k) {
+    test_indices <- which(folds == i, arr.ind = TRUE)
+    test_data <- data[test_indices, ]
+    train_data <- data[-test_indices, ]
+    
+    model <- lm(formula, data = train_data)
+    
+    predictions <- predict(model, newdata = test_data)
+    
+    mse <- mean((test_data[[as.character(formula[[2]])]] - predictions)^2)
+    rss <- sum((test_data[[as.character(formula[[2]])]] - predictions)^2)
+    tss <- sum((test_data[[as.character(formula[[2]])]] - mean(test_data[[as.character(formula[[2]])]]))^2)
+    r2 <- 1 - (rss / tss)
+    
+    errors[i] <- mse
+    r_squared[i] <- r2
+  }
+  
+  list(
+    Mean_MSE = mean(errors),
+    Mean_R_squared = mean(r_squared),
+    Errors_per_fold = errors,
+    R_squared_per_fold = r_squared
+  )
+}
+```
+
+Choosing a set of predictors and testing basic assumptions, then shrinkage
+
+Economical variables:
+Energy and water earnings
+Information and communication earnings
+Education earnings
+Accomodation and food earnings
+Producers of capital goods
+Retail earnings
+Unemployment rate 
+Vacancies count
+Consumer.Price.Index
+Overall.economy
+
+Social variables:
+Immigration arrivals
+Immigration departures
+German departures
+Births
+Marriages
+
+Dependent variables
+"Total.offences" - bp fails
+"Offences.against.life" - OK
+"Murder" - ok
+"Criminal.offenses.against.sexual.self.determination.in.total" - bp fails
+"Robberies.in.apartments" - ok
+"Total.theft" - ok
+
+```{r}
+var <- "Total.offences"
+# Load and clean data
+data_monthly <- read.csv("monthly.csv")
+data_cleaned <- na.omit(data_monthly)
+
+#print(colnames(data_cleaned))
+# Select columns + dependent column (var)
+data_selected <- data_cleaned %>%
+  dplyr::select(
+    Total.offences,
+    Unemployment.rate,
+    Vacancies.unfilled,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+    Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay.
+  )
+# Primary model
+aliased_formula <- as.formula(paste(var, "~ ."))
+aliased_lm <- lm(aliased_formula, data = data_selected)
+check_model_assumptions(aliased_lm)
+
+```
+"Total.offences" - ok after multicollinearity
+"Offences.against.life" - fail after multicollinearity 
+"Murder" - ok, normality is on edge
+"Criminal.offenses.against.sexual.self.determination.in.total" - both fail
+"Robberies.in.apartments" - ok
+"Total.theft" - both fail
+```{r}
+# Reduce multicollinearity
+offences_formula <- as.formula(paste(var, "~ . "))
+
+reduced_formula <- reduce_multicollinearity(data_selected, offences_formula)
+
+# Create model
+reduced_lm <- lm(reduced_formula, data = data_selected)
+check_model_assumptions(reduced_lm)
+
+# Stepwise regression
+sink(tempfile())
+step_lm <- stepAIC(reduced_lm, direction = "both", data = data_selected)
+sink()
+check_model_assumptions(step_lm)
+anova(aliased_lm, reduced_lm, step_lm)
+#summary(aliased_lm)$adj.r.squared
+#summary(reduced_lm)$adj.r.squared
+#summary(step_lm)$adj.r.squared
+cross_validate_lm(formula(step_lm), data_selected, 10)
+```
+RESULTS FOR EACH VARIABLE:
+"Total.offences" - aliased_lm is the best fit, but step_lm has all assumptions
+"Offences.against.life" - aliased_lm is the best fit - multicovarriant
+"Murder" - weak fit, not a useful model
+"Criminal.offenses.against.sexual.self.determination.in.total" - aliased_lm is the best fit - multicovarriant
+"Robberies.in.apartments" - step_lm is the best
+"Total.theft" - aliased_lm is the best fit - multicovarriant
+
+ADJUSTED R-SQUARED FOR EACH VARIABLE FOR EACH MODEL   
+"Total.offences" 
+- 0.7334932 *
+- 0.5955256
+- 0.602088
+
+"Offences.against.life" 
+- 0.4734024 *
+- 0.3663477
+- 0.3653641
+
+"Murder" 
+- 0.3303478 
+- 0.2837881
+- 0.2807857 *
+
+"Criminal.offenses.against.sexual.self.determination.in.total" 
+- 0.7658117 *
+- 0.5690452
+- 0.5721362
+
+"Robberies.in.apartments" 
+- 0.5351619
+- 0.5312519
+- 0.5370938 *
+
+"Total.theft" 
+- 0.8501214 *
+- 0.6355742
+- 0.6383406
+
+```{r}
+# Total.offences manual multicollinearity prevention
+data_selected <- data_cleaned %>%
+  dplyr::select(
+    Total.offences,
+    Unemployment.rate,
+    Vacancies.unfilled,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+    Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay.
+  )
+# Create model
+manual_lm <- lm(Total.offences ~ .  -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay., data = data_selected)
+#summary(manual_lm)
+#vif(manual_lm)
+check_model_assumptions(manual_lm)
+
+step_formula <- Total.offences ~ .  -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay. -Education..Index.coll..agreed.monthly.earnings.with.sp.pay. -Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay. -Marriages.per.1000.inhabitants_x
+
+step_lm <- lm(step_formula, data = data_selected)
+check_model_assumptions(step_lm)
+
+anova(aliased_lm, reduced_lm, step_lm)
+#summary(aliased_lm)$adj.r.squared
+#summary(reduced_lm)$adj.r.squared
+#summary(step_lm)$adj.r.squared
+
+cross_validate_lm(step_formula, data_selected, 10)
+
+```
+Manual selection and multicovariate reduction:
+
+Total.offences:
+0.7334932
+0.6777438 *
+0.6694773 *
+
+- variables:
+Unemployment rate 
+Births total
+Germans total departures
+Foreigners total arrivals
+Foreigners total departures
+Turnover in retail trade
+Consumer price index
+
+
+```{r}
+# Criminal.offenses.against.sexual.self.determination.in.total manual multicollinearity prevention
+data_selected <- data_cleaned %>%
+  dplyr::select(
+    Criminal.offenses.against.sexual.self.determination.in.total,
+    Unemployment.rate,
+    Vacancies.unfilled,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+    Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+  )
+
+aliased_lm <- lm(Criminal.offenses.against.sexual.self.determination.in.total ~ ., data = data_selected)
+#check_model_assumptions(manual_lm)
+# Create model
+manual_lm <- lm(Criminal.offenses.against.sexual.self.determination.in.total ~ . -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Education..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay., data = data_selected)
+
+#summary(manual_lm)
+#vif(manual_lm)
+check_model_assumptions(manual_lm)
+
+step_lm <- lm(Criminal.offenses.against.sexual.self.determination.in.total ~ . -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Education..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay. -Marriages.per.1000.inhabitants_x -Foreigners_Total_Arrivals.from.foreign.countries , data = data_selected)
+summary(step_lm)
+```
+
+```{r}
+# Total.theft manual multicollinearity prevention
+data_selected <- data_cleaned %>%
+  dplyr::select(
+    Total.theft,
+    Unemployment.rate,
+    Vacancies.unfilled,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+    Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+  )
+
+aliased_lm <- lm(Total.theft ~ ., data = data_selected)
+#check_model_assumptions(manual_lm)
+# Create model
+manual_lm <- lm(Total.theft ~ . -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Education..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Germans_Total_Departures.to.foreign.countries, data = data_selected)
+
+#vif(manual_lm)
+check_model_assumptions(manual_lm)
+
+step_lm <- lm(Total.theft ~ . -Overall.economy..Index.coll..agreed.monthly.earnings.with.sp.pay. -Transportation.and.storage..Index.coll..agreed.monthly.earnings.with.sp.pay. -Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay. -Information.and.communication..Index.coll..agreed.monthly.earnings.with.sp.pay. -Construction..Index.coll..agreed.monthly.earnings.with.sp.pay. -Education..Index.coll..agreed.monthly.earnings.with.sp.pay. -Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay. -Vacancies.unfilled -Germans_Total_Departures.to.foreign.countries -Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay. -Consumer.Price.Index, data = data_selected)
+
+check_model_assumptions(step_lm)
+```
+VARIABLES PRESENT IN REDUCED MODELS
+
+Economical variables:
+Energy and water earnings ****
+Information and communication earnings 
+Education earnings 
+Accomodation and food earnings 
+Producers of capital goods 
+Repair and installation of machinery ****
+Turnover in Retail! ******
+Unemployment rate ****
+Vacancies count 
+Consumer.Price.Index *****
+Overall.economy
+
+Social variables:
+Immigration arrivals ***
+Immigration departures **
+German departures 
+Births ****
+Marriages! ******
