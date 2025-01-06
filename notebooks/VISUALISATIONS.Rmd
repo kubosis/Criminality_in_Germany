@@ -9,6 +9,7 @@ library(AER)
 library(dplyr)       # all_of()
 library(ggplot2)     # plotting  
 library(tidyr)       # plotting
+library(svglite)
 ```
 Ideas for observations - is there relationship between non-germans and specific crime types
 
@@ -137,8 +138,8 @@ data_cleaned <- na.omit(data_monthly)
 data_crime_months <- data_cleaned %>%
   dplyr::select(
     Date,
-    Total.offences,
-    Foreigners_Total_Arrivals.from.foreign.countries,
+    Total.theft, 
+    Foreigners_Total_Departures.to.foreign.countries
   )
 
 data_crime_months$Date <- as.Date(data_crime_months$Date)
@@ -167,12 +168,12 @@ monthly_crime <- monthly_crime %>%
 
 ggplot(monthly_crime, aes(x = Month, y = Average_Count, color = Crime_Type, group = Crime_Type)) +
   geom_line(size = 1) +
-  geom_point(size = 2) +  
+  geom_point(size = 2) +
   labs(title = "Average Monthly Crime Fluctuations",
-       x = "Month", y = "Average Crime Count") +
+       x = "Month", y = "Count") +
   theme_minimal() +
-  theme(legend.title = element_blank())
-
+  theme(legend.title = element_blank()) 
+  #+ylim(0, NA)
 
 ```
 
@@ -180,4 +181,42 @@ VISUALISATION______________________________________
 ```{r}
 visualise_crime_percentages_heatmap(non_german_percentage)
 
+data_monthly <- read.csv("monthly.csv")
+data_cleaned <- na.omit(data_monthly)
+data <- data_cleaned %>%
+  dplyr::select(
+    Total.theft,
+    Unemployment.rate,
+    Births_Total_x,
+    Marriages.per.1000.inhabitants_x,
+    #Germans_Total_Departures.to.foreign.countries,
+    Foreigners_Total_Arrivals.from.foreign.countries,
+    Foreigners_Total_Departures.to.foreign.countries,
+    Turnover.in.retail.trade,
+    #Energy.and.water.supply..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Construction..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Manufacturing..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Repair.and.installation.of.machinery.and.equipment..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Accommodation.and.food.and.beverage.service.act...Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Human.health.and.social.work.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Gambling.and.betting.activities..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Manufacture.of.beverages..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    #Education..Index.coll..agreed.monthly.earnings.with.sp.pay.,
+    Consumer.Price.Index,
+  )
+
+# Assuming your dataset is named 'data'
+predictors <- c("Foreigners_Total_Departures.to.foreign.countries")
+
+# Generate scatter plots for each predictor
+for (predictor in predictors) {
+  p <- ggplot(data, aes_string(x = predictor, y = "Total.theft")) +
+    geom_point() +
+    labs(title = paste(predictor, "- Total.theft"), x = predictor, y = "Total.theft") +
+    theme_minimal()
+  print(p)  # Print each plot
+  image=qplot(clarity, data=diamonds, fill=cut, geom="bar")
+  #This actually save the plot in a image
+  ggsave(file="relation.svg", plot=image, width=10, height=8)
+}
 ```

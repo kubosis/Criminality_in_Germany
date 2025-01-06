@@ -147,7 +147,7 @@ data_cleaned <- na.omit(data_monthly)
 # Select columns + dependent column (var)
 data_selected <- data_cleaned %>%
   dplyr::select(
-    !!sym(var),
+    Total.offences,
     Unemployment.rate,
     Vacancies.unfilled,
     Births_Total_x,
